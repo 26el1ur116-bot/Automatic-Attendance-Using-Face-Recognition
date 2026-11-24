@@ -124,6 +124,10 @@ class AttendanceApp:
                                 activebackground="#585B70", command=self.refresh_stats, **btn_style)
         btn_refresh.pack(pady=5, fill="x")
 
+        btn_git = tk.Button(left_col, text="🚀 Commit & Update GitHub", bg="#B4BEFE", fg="#11111B",
+                            activebackground="#CBA6F7", command=self.on_commit_and_update_clicked, **btn_style)
+        btn_git.pack(pady=5, fill="x")
+
         # Right Column - Table of Today's Attendance
         right_col = tk.Frame(main_frame, bg="#181825")
         right_col.pack(side="right", fill="both", expand=True)
@@ -375,6 +379,14 @@ class AttendanceApp:
             self.update_status(f"Opened {os.path.basename(csv_path)}", "#A6E3A1")
         else:
             messagebox.showinfo("Not Found", "No attendance file created yet.")
+
+    def on_commit_and_update_clicked(self):
+        bat_path = os.path.join(config.BASE_DIR, "COMMIT_AND_UPDATE.bat")
+        if os.path.exists(bat_path):
+            os.startfile(bat_path)
+            self.update_status("Launched Git Commit & Update console...", "#B4BEFE")
+        else:
+            messagebox.showerror("Not Found", "COMMIT_AND_UPDATE.bat not found in project folder.")
 
 if __name__ == "__main__":
     root = tk.Tk()
