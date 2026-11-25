@@ -9,6 +9,7 @@ import os
 import sys
 import shutil
 import threading
+import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from datetime import datetime
@@ -240,11 +241,20 @@ class AttendanceApp:
                             "4. Press 'q' or 'ESC' on the camera window if you need to cancel.")
 
         def run_capture():
-            success, msg = capture_student(name, roll, age)
-            if success:
-                self.root.after(0, lambda: messagebox.showinfo("Success", msg + "\n\nRemember to click 'Train Model' next!"))
+            script_path = os.path.join(config.BASE_DIR, "register_student.py")
+            cmd = [sys.executable, script_path, name, roll, str(age_val)]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            output = (res.stdout or "") + (res.stderr or "")
+
+            if "Successfully registered" in output:
+                self.root.after(0, lambda: messagebox.showinfo("Success", f"Successfully registered {name} (Roll: {roll})!\n\nRemember to click 'Train Model' next!"))
+            elif "Registration was cancelled" in output:
+                self.root.after(0, lambda: self.update_status("Registration cancelled by user."))
             else:
-                self.root.after(0, lambda: messagebox.showerror("Registration Blocked", msg))
+                err_lines = [line.strip() for line in output.splitlines() if line.strip().startswith(("[ERROR]", "[SECURITY ALERT]"))]
+                err_msg = err_lines[0] if err_lines else "Registration could not be completed. Check camera connection."
+                self.root.after(0, lambda: messagebox.showerror("Registration Result", err_msg))
+
             self.root.after(0, self.refresh_stats)
             self.root.after(0, lambda: self.update_status("System Ready"))
 
@@ -272,11 +282,10 @@ class AttendanceApp:
         self.update_status("Attendance camera running... Press 'q' on camera window to stop.", "#A6E3A1")
 
         def run_att():
-            success, msg = start_attendance_system()
+            script_path = os.path.join(config.BASE_DIR, "take_attendance.py")
+            subprocess.run([sys.executable, script_path])
             self.root.after(0, self.refresh_stats)
             self.root.after(0, lambda: self.update_status("System Ready"))
-            if success:
-                self.root.after(0, lambda: messagebox.showinfo("Session Finished", msg))
 
         threading.Thread(target=run_att, daemon=True).start()
 

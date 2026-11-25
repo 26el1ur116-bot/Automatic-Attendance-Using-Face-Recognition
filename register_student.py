@@ -12,6 +12,7 @@ Includes Anti-Fraud & Identity Theft Protection:
 
 import cv2
 import os
+import sys
 import json
 import time
 import shutil
@@ -146,9 +147,9 @@ def capture_student(student_name: str, roll_no: str, age: str, on_progress=None)
     face_cascade = cv2.CascadeClassifier(config.CASCADE_PATH)
 
     # Initialize Webcam
-    cap = cv2.VideoCapture(config.CAMERA_INDEX)
+    cap = config.open_camera()
     if not cap.isOpened():
-        return False, "Could not access webcam. Ensure no other application is using it."
+        return False, "Could not access webcam. Ensure no other application (Zoom, Teams, Camera) is using it."
 
     has_model = (recognizer is not None and len(label_map) > 0)
 
@@ -183,150 +184,145 @@ def capture_student(student_name: str, roll_no: str, age: str, on_progress=None)
     print(f"[INFO] Initial Phase: {current_phase}")
     print("[INFO] Press 'q', 'ESC', or click 'X' to cancel.")
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        frame = cv2.flip(frame, 1)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        h_frame, w_frame, _ = frame.shape
+            frame = cv2.flip(frame, 1)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            h_frame, w_frame, _ = frame.shape
 
-        faces = face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.15,
-            minNeighbors=5,
-            minSize=(80, 80)
-        )
+            faces = face_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.15,
+                minNeighbors=5,
+                minSize=(80, 80)
+            )
 
-        current_time = time.time()
+            current_time = time.time()
 
-        for (x, y, w, h) in faces:
-            face_crop = gray[y:y+h, x:x+w]
-            face_resized = cv2.resize(face_crop, (config.FACE_WIDTH, config.FACE_HEIGHT))
-            # Histogram Equalization for lighting normalization
-            face_equalized = cv2.equalizeHist(face_resized)
+            for (x, y, w, h) in faces:
+                face_crop = gray[y:y+h, x:x+w]
+                face_resized = cv2.resize(face_crop, (config.FACE_WIDTH, config.FACE_HEIGHT))
+                # Histogram Equalization for lighting normalization
+                face_equalized = cv2.equalizeHist(face_resized)
 
-            # ----------------- SECURITY PHASE 1: VERIFY OWNER -----------------
-            if current_phase == "VERIFY_OWNER":
-                label_id, conf = recognizer.predict(face_equalized)
-                check_frames += 1
+                # ----------------- SECURITY PHASE 1: VERIFY OWNER -----------------
+                if current_phase == "VERIFY_OWNER":
+                    label_id, conf = recognizer.predict(face_equalized)
+                    check_frames += 1
 
-                if label_id in label_map and conf < config.BIOMETRIC_VERIFY_THRESHOLD:
-                    predicted_roll = str(label_map[label_id]["roll_no"]).strip().lower()
-                    if predicted_roll == roll_key:
-                        owner_match_count += 1
+                    if label_id in label_map and conf < config.BIOMETRIC_VERIFY_THRESHOLD:
+                        predicted_roll = str(label_map[label_id]["roll_no"]).strip().lower()
+                        if predicted_roll == roll_key:
+                            owner_match_count += 1
 
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 200, 0), 2)
-                cv2.putText(frame, f"Authenticating Identity... ({check_frames}/{max_check_frames})",
-                            (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 0), 2)
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 200, 0), 2)
+                    cv2.putText(frame, f"Authenticating Identity... ({check_frames}/{max_check_frames})",
+                                (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 0), 2)
 
-                if check_frames >= max_check_frames:
-                    if owner_match_count >= 5:
-                        print(f"[AUTH] Identity confirmed as {student_name}! Capturing new samples.")
-                        current_phase = "CAPTURE"
-                    else:
-                        cap.release()
-                        cv2.destroyAllWindows()
+                    if check_frames >= max_check_frames:
+                        if owner_match_count >= 5:
+                            print(f"[AUTH] Identity confirmed as {student_name}! Capturing new samples.")
+                            current_phase = "CAPTURE"
+                        else:
+                            try:
+                                winsound.Beep(600, 500)
+                            except Exception:
+                                pass
+                            error_msg = (
+                                f"IDENTITY THEFT ATTEMPT BLOCKED!\n\n"
+                                f"This Roll Number ({roll_no}) belongs to: '{existing_owner_name}'.\n\n"
+                                f"The face in front of the camera DOES NOT match the registered biometric profile!\n"
+                                f"Another person cannot re-register or overwrite your details."
+                            )
+                            print(f"[SECURITY ALERT] {error_msg}")
+                            return False, error_msg
+                    break
+
+                # ----------------- SECURITY PHASE 2: CHECK UNIQUENESS -----------------
+                elif current_phase == "CHECK_UNIQUENESS":
+                    label_id, conf = recognizer.predict(face_equalized)
+                    check_frames += 1
+
+                    if label_id in label_map and conf < config.BIOMETRIC_DUPLICATE_THRESHOLD:
+                        other_match_count += 1
+                        matched_other_name = label_map[label_id]["name"]
+                        matched_other_roll = label_map[label_id]["roll_no"]
+
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 200, 0), 2)
+                    cv2.putText(frame, f"Checking Face Uniqueness... ({check_frames}/{max_check_frames})",
+                                (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 0), 2)
+
+                    if other_match_count >= 5:
                         try:
                             winsound.Beep(600, 500)
                         except Exception:
                             pass
                         error_msg = (
-                            f"IDENTITY THEFT ATTEMPT BLOCKED!\n\n"
-                            f"This Roll Number ({roll_no}) belongs to: '{existing_owner_name}'.\n\n"
-                            f"The face in front of the camera DOES NOT match the registered biometric profile!\n"
-                            f"Another person cannot re-register or overwrite your details."
+                            f"DUPLICATE FACE REJECTED!\n\n"
+                            f"This face is already registered in the system as:\n"
+                            f"Name: {matched_other_name}\n"
+                            f"Roll No: {matched_other_roll}\n\n"
+                            f"A single face cannot be registered under multiple names or roll numbers!"
                         )
                         print(f"[SECURITY ALERT] {error_msg}")
                         return False, error_msg
-                break
 
-            # ----------------- SECURITY PHASE 2: CHECK UNIQUENESS -----------------
+                    if check_frames >= max_check_frames:
+                        current_phase = "CAPTURE"
+                    break
+
+                # ----------------- PHASE 3: CAPTURING SAMPLES -----------------
+                elif current_phase == "CAPTURE":
+                    os.makedirs(student_dir, exist_ok=True)
+
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+                    if count < config.NUM_SAMPLES and (current_time - last_capture_time) >= capture_interval:
+                        file_path = os.path.join(student_dir, f"sample_{count+1:02d}.jpg")
+                        cv2.imwrite(file_path, face_equalized)
+
+                        count += 1
+                        last_capture_time = current_time
+
+                        if on_progress:
+                            on_progress(count, config.NUM_SAMPLES)
+
+                    label = f"Capturing: {count}/{config.NUM_SAMPLES}"
+                    cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    break
+
+            # Top HUD Banner
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (w_frame, 45), (20, 20, 20), -1)
+            cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+
+            if current_phase == "VERIFY_OWNER":
+                hud_text = f"Security Check: Verifying you are {student_name} ({roll_no})..."
             elif current_phase == "CHECK_UNIQUENESS":
-                label_id, conf = recognizer.predict(face_equalized)
-                check_frames += 1
+                hud_text = f"Security Check: Verifying face is unique... Please look at camera"
+            else:
+                hud_text = f"Student: {student_name} | Age: {age_int} | Progress: {count}/{config.NUM_SAMPLES}"
 
-                if label_id in label_map and conf < config.BIOMETRIC_DUPLICATE_THRESHOLD:
-                    other_match_count += 1
-                    matched_other_name = label_map[label_id]["name"]
-                    matched_other_roll = label_map[label_id]["roll_no"]
+            cv2.putText(frame, hud_text, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
+            win_name = "Face Attendance System - Student Registration"
+            cv2.imshow(win_name, frame)
 
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 200, 0), 2)
-                cv2.putText(frame, f"Checking Face Uniqueness... ({check_frames}/{max_check_frames})",
-                            (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 0), 2)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q') or key == 27 or (cv2.getWindowProperty(win_name, cv2.WND_PROP_VISIBLE) < 1):
+                print("\n[INFO] Registration cancelled by user.")
+                if os.path.exists(student_dir) and count < config.NUM_SAMPLES and not is_re_registering:
+                    shutil.rmtree(student_dir, ignore_errors=True)
+                return False, "Registration was cancelled by user."
 
-                if other_match_count >= 5:
-                    cap.release()
-                    cv2.destroyAllWindows()
-                    try:
-                        winsound.Beep(600, 500)
-                    except Exception:
-                        pass
-                    error_msg = (
-                        f"DUPLICATE FACE REJECTED!\n\n"
-                        f"This face is already registered in the system as:\n"
-                        f"Name: {matched_other_name}\n"
-                        f"Roll No: {matched_other_roll}\n\n"
-                        f"A single face cannot be registered under multiple names or roll numbers!"
-                    )
-                    print(f"[SECURITY ALERT] {error_msg}")
-                    return False, error_msg
-
-                if check_frames >= max_check_frames:
-                    current_phase = "CAPTURE"
+            if count >= config.NUM_SAMPLES:
                 break
-
-            # ----------------- PHASE 3: CAPTURING SAMPLES -----------------
-            elif current_phase == "CAPTURE":
-                os.makedirs(student_dir, exist_ok=True)
-
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-                if count < config.NUM_SAMPLES and (current_time - last_capture_time) >= capture_interval:
-                    file_path = os.path.join(student_dir, f"sample_{count+1:02d}.jpg")
-                    cv2.imwrite(file_path, face_equalized)
-
-                    count += 1
-                    last_capture_time = current_time
-
-                    if on_progress:
-                        on_progress(count, config.NUM_SAMPLES)
-
-                label = f"Capturing: {count}/{config.NUM_SAMPLES}"
-                cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                break
-
-        # Top HUD Banner
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (w_frame, 45), (20, 20, 20), -1)
-        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
-
-        if current_phase == "VERIFY_OWNER":
-            hud_text = f"Security Check: Verifying you are {student_name} ({roll_no})..."
-        elif current_phase == "CHECK_UNIQUENESS":
-            hud_text = f"Security Check: Verifying face is unique... Please look at camera"
-        else:
-            hud_text = f"Student: {student_name} | Age: {age_int} | Progress: {count}/{config.NUM_SAMPLES}"
-
-        cv2.putText(frame, hud_text, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2)
-        win_name = "Face Attendance System - Student Registration"
-        cv2.imshow(win_name, frame)
-
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q') or key == 27 or (cv2.getWindowProperty(win_name, cv2.WND_PROP_VISIBLE) < 1):
-            print("\n[INFO] Registration cancelled by user.")
-            cap.release()
-            cv2.destroyAllWindows()
-            if os.path.exists(student_dir) and count < config.NUM_SAMPLES and not is_re_registering:
-                shutil.rmtree(student_dir, ignore_errors=True)
-            return False, "Registration was cancelled by user."
-
-        if count >= config.NUM_SAMPLES:
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
 
     metadata = {
         "roll_no": roll_no,
@@ -347,12 +343,17 @@ def capture_student(student_name: str, roll_no: str, age: str, on_progress=None)
     return True, msg
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("      FACE RECOGNITION ATTENDANCE SYSTEM - REGISTRATION      ")
-    print("=" * 60)
-    name_input = input("Enter Student Full Name: ").strip()
-    roll_input = input("Enter Student Roll Number / ID: ").strip()
-    age_input = input(f"Enter Student Age ({config.MIN_STUDENT_AGE}-{config.MAX_STUDENT_AGE}): ").strip()
+    if len(sys.argv) >= 4:
+        name_input = sys.argv[1].strip()
+        roll_input = sys.argv[2].strip()
+        age_input = sys.argv[3].strip()
+    else:
+        print("=" * 60)
+        print("      FACE RECOGNITION ATTENDANCE SYSTEM - REGISTRATION      ")
+        print("=" * 60)
+        name_input = input("Enter Student Full Name: ").strip()
+        roll_input = input("Enter Student Roll Number / ID: ").strip()
+        age_input = input(f"Enter Student Age ({config.MIN_STUDENT_AGE}-{config.MAX_STUDENT_AGE}): ").strip()
 
     success, message = capture_student(name_input, roll_input, age_input)
     if not success:

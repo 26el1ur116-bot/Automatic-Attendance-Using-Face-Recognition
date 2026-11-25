@@ -1,4 +1,5 @@
 import os
+import cv2
 
 # Base Directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +20,15 @@ for folder in [DATASET_DIR, ATTENDANCE_DIR, MODELS_DIR]:
 
 # Camera & Detection Settings
 CAMERA_INDEX = 0
+CAMERA_BACKEND = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
+
+def open_camera(index=CAMERA_INDEX):
+    """Opens camera with DirectShow on Windows for instant, reliable capture."""
+    cap = cv2.VideoCapture(index, CAMERA_BACKEND)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(index)
+    return cap
+
 NUM_SAMPLES = 40                 # Number of face photos captured during registration
 FACE_WIDTH = 200                 # Standardized face width (px)
 FACE_HEIGHT = 200                # Standardized face height (px)
@@ -28,12 +38,6 @@ MIN_STUDENT_AGE = 16             # Minimum permitted college student age
 MAX_STUDENT_AGE = 25             # Maximum permitted college student age
 
 # Calibrated Biometric Matching Thresholds (LBPH Chi-Square Distance)
-# Mathematical Calibration:
-#   - Genuine live webcam faces score between 20 and 52
-#   - Unknown strangers score between 62.7 and 66+
-# Setting threshold to 57 provides a 5-point safety margin on both sides:
-#   -> Genuine students (<54) are recognized smoothly!
-#   -> Unknown strangers (>62) are strictly rejected!
 CONFIDENCE_THRESHOLD = 57        
 BIOMETRIC_VERIFY_THRESHOLD = 56  
 BIOMETRIC_DUPLICATE_THRESHOLD = 54 
